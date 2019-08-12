@@ -1,3 +1,4 @@
+#TROCAR TODOS OS NOMES NEIGHBOURHOOOD POR NEIGHBORHOOD
 # importing necessaru dependencies
 import pandas as pd
 
@@ -67,4 +68,183 @@ for index, row in df.iterrows():
     #
     #row['Longitude'] = codes.loc[row[0],'Longitude']
     
-df
+#----------------------------------
+    
+    
+    
+df1 = df[:]
+df = df1[:]
+#in order to work just with locations in toronto, lets drop all lines outside toronto
+df.drop(df[df['Borough'].str.contains('Toronto')==False].index, inplace=True )
+df.reset_index(drop=True, inplace=True)
+
+
+# not lets see these where are the boroughs in the map, but first we need toronto latitude
+# for this task we are going to use geopy library
+from geopy.geocoders import Nominatim 
+
+
+address = 'Toronto, CA'
+
+geolocator = Nominatim(user_agent="ca_explorer")
+location = geolocator.geocode(address)
+latitude = location.latitude
+longitude = location.longitude
+print('The geograpical coordinate of Toronto CA are {}, {}.'.format(latitude, longitude))
+
+
+#now we are ready to use folium to plot the boroughs
+#!conda install -c conda-forge folium=0.5.0 --yes # uncomment this line if you haven't completed the Foursquare API lab
+
+import folium
+import json
+import requests # library to handle requests
+
+
+# create map of New York using latitude and longitude values
+map_newyork = folium.Map(location=[latitude, longitude], zoom_start=10)
+
+# add markers to map
+for lat, lng, borough, neighborhood in zip(df['Latitude'], df['Longitude'], df['Borough'], df['Neighbourhood']):
+    label = '{}, {}'.format(neighborhood, borough)
+    label = folium.Popup(label, parse_html=True)
+    folium.CircleMarker(
+        [lat, lng],
+        radius=5,
+        popup=label,
+        color='blue',
+        fill=True,
+        fill_color='#3186cc',
+        fill_opacity=0.7,
+        parse_html=False).add_to(map_newyork)  
+    
+map_newyork.save("mymap.html")
+
+
+#now lets use foursquare to get interesting places around each neighbourhood, so we can cluster them
+#first lets assign secret data
+
+CLIENT_ID = 'IG0WM4KPS4BQG2SWJU0RB0ISV1OUVFHESE5MGEWCIVBHWWYP' # your Foursquare ID
+CLIENT_SECRET = 'EPFTFBU0VTX0YEEAZA0KOYZFYJRLOHKFGEIUVNT3D5YRFW2F' # your Foursquare Secret
+VERSION = '20180605' # Foursquare API version
+
+def getNearbyVenues(names, latitudes, longitudes, radius=500):
+    
+    venues_list=[]
+    for name, lat, lng in zip(names, latitudes, longitudes):
+        print(name)
+        
+        # set limit
+        LIMIT = 100
+        
+        # create the API request URL
+        url = 'https://api.foursquare.com/v2/venues/explore?&client_id={}&client_secret={}&v={}&ll={},{}&radius={}&limit={}'.format(
+            CLIENT_ID, 
+            CLIENT_SECRET, 
+            VERSION, 
+            lat, 
+            lng, 
+            radius, 
+            LIMIT)
+            
+        # make the GET request
+        results = requests.get(url).json()["response"]['groups'][0]['items']
+        
+        # return only relevant information for each nearby venue
+        venues_list.append([(
+            name, 
+            lat, 
+            lng, 
+            v['venue']['name'], 
+            v['venue']['location']['lat'], 
+            v['venue']['location']['lng'],  
+            v['venue']['categories'][0]['name']) for v in results])
+
+    nearby_venues = pd.DataFrame([item for venue_list in venues_list for item in venue_list])
+    nearby_venues.columns = ['Neighborhood', 
+                  'Neighborhood Latitude', 
+                  'Neighborhood Longitude', 
+                  'Venue', 
+                  'Venue Latitude', 
+                  'Venue Longitude', 
+                  'Venue Category']
+    
+    return(nearby_venues)
+
+toronto_venues = getNearbyVenues(names=df['Neighbourhood'], latitudes=df['Latitude'], longitudes=df['Longitude'])
+
+
+
+#LETS SEE THE SIZE OF THIS SHIT
+print(toronto_venues.shape)
+
+
+#see venues per neighbourhood
+toronto_venues.groupby('Neighborhood').count()
+#unique categories
+print('There are {} uniques categories.'.format(len(toronto_venues['Venue Category'].unique())))
+
+#now blablabla analysis
+# one hot encoding
+toronto_onehot = pd.get_dummies(toronto_venues[['Venue Category']], prefix="", prefix_sep="")
+
+# add neighborhood column back to dataframe
+toronto_onehot['Neighborhood_'] = toronto_venues['Neighborhood'] 
+
+# move neighborhood column to the first column
+fixed_columns = [toronto_onehot.columns[-1]] + list(toronto_onehot.columns[:-1])
+toronto_onehot = toronto_onehot[fixed_columns]
+
+toronto_onehot.head()
+
+
+#### Next, let's group rows by neighborhood and by taking the mean of the frequency of occurrence of each category
+toronto_grouped = toronto_onehot.groupby('Neighborhood_').mean().reset_index()
+
+import numpy as np
+
+# confirm new size
+toronto_grouped.shape
+
+
+#### Let's print each neighborhood along with the top 5 most common venues
+num_top_venues = 5
+
+for hood in toronto_grouped['Neighborhood_']:
+    print("----"+hood+"----")
+    temp = toronto_grouped[toronto_grouped['Neighborhood_'] == hood].T.reset_index()
+    temp.columns = ['venue','freq']
+    temp = temp.iloc[1:]
+    temp['freq'] = temp['freq'].astype(float)
+    temp = temp.round({'freq': 2})
+    print(temp.sort_values('freq', ascending=False).reset_index(drop=True).head(num_top_venues))
+    print('\n')
+    
+#### Let's put that into a *pandas* dataframe - First, let's write a function to sort the venues in descending order.
+def return_most_common_venues(row, num_top_venues):
+    row_categories = row.iloc[1:]
+    row_categories_sorted = row_categories.sort_values(ascending=False)
+    
+    return row_categories_sorted.index.values[0:num_top_venues]
+
+#Now let's create the new dataframe and display the top 10 venues for each neighborhood.
+num_top_venues = 10
+
+indicators = ['st', 'nd', 'rd']
+
+# create columns according to number of top venues
+columns = ['Neighborhood_']
+for ind in np.arange(num_top_venues):
+    try:
+        columns.append('{}{} Most Common Venue'.format(ind+1, indicators[ind]))
+    except:
+        columns.append('{}th Most Common Venue'.format(ind+1))
+
+# create a new dataframe
+neighborhoods_venues_sorted = pd.DataFrame(columns=columns)
+neighborhoods_venues_sorted['Neighborhood_'] = toronto_grouped['Neighborhood_']
+
+for ind in np.arange(toronto_grouped.shape[0]):
+    neighborhoods_venues_sorted.iloc[ind, 1:] = return_most_common_venues(toronto_grouped.iloc[ind, :], num_top_venues)
+
+neighborhoods_venues_sorted.head()
