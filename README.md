@@ -8,4 +8,4 @@ IBM required the Data Science Project to be presented  in a Jupyter notebook, in
 
 This repository will hold all files submitted by me to IBM/Coursera.
 
-Also, i stored in this repository a short notebook I coded to get used to K-Means Clustering Algorithm before starting my Data Science project.
+Also, i stored in this repository a [short notebook](https://github.com/luisgrotti/IBM_Coursera_Capstone/blob/master/Clustering%20Neighborhoods%20in%20Toronto.ipynb) I coded to get used to K-Means Clustering Algorithm before starting my Data Science project.
